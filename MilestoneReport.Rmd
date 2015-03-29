@@ -1,0 +1,388 @@
+---
+title: Milestone Report.
+subtitle: <h3>Capstone Project of the Coursera JHU Data Science Specialization.</h3>
+author: <h4>fss14142</h4>
+date: March 2015.
+output: 
+              html_document:
+                toc: true
+                toc_depth: 2
+---
+
+
+# Summary.
+
+This report describes my up to date work in the Capstone Project of the [Coursera JHU Data Science Specialization](https://www.coursera.org/specialization/jhudatascience/). The main goal of this project is to use R to design an application that starting from an input text will predict the next word in the input. 
+
+This is a non-technical summary, intended for a general audience. For a complete version with all the code details, please look at 
+
+```{r Setup, echo=FALSE, message=FALSE, warning=FALSE}
+
+## Initial knitr options and  required libraries.
+options(cache=TRUE)
+
+#install.packages(c("R.utils", "tm", "caret", "RWeka", "RWekajars"), dependencies = TRUE)
+require(tm)
+require(R.utils)
+require(caret)
+```
+
+---- 
+
+# Obtaining the data.
+
+To predict anything we always need two basic ingredients: data and a prediction model. In this report we are gonig to concentrate in the analysis of the data, leaving the modeling part for a later stage of the project. We will only include some comments about the modeling strategy at the end of this report.
+
+The [Capstone Project Dataset](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip) is downloaded  as a zip file. It is a big file, over 500Mb, containing three large files:
+
+1. en_US.blogs.txt
+2. en_US.news.txt
+3. en_US.twitter.txt
+
+For further information about these files, please see [http://www.corpora.heliohost.org/](http://www.corpora.heliohost.org/)
+
+```{r downloadData, echo=FALSE, message=FALSE, warning=FALSE}
+# The https method does not work in all machines and so I have replaced it with http. It is only necessary to download this file once. So we check to see if the file already exists, and in that case we skip the download . 
+
+if(!file.exists("data")){dir.create("data")}
+if(!file.exists("./data/Coursera-SwiftKey.zip")){
+  dataURL = "http://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+  download.file(dataURL, destfile = "./data/Coursera-SwiftKey.zip")
+}
+```
+
+```{r extractZip, echo=FALSE}
+# Once the download is completed, we can proceed to extract the contents of the zipfile. This is again a time consuming operation. So we will check for the existence of the required files to skip decompression if it has already been performed.  
+
+blogsFile = "./data/final/en_Us/en_US.blogs.txt"
+newsFile = "./data/final/en_Us/en_US.news.txt"
+twitterFile = "./data/final/en_Us/en_US.twitter.txt"
+
+filesOk = file.exists(blogsFile) & file.exists(newsFile) & file.exists(twitterFile) 
+if(!filesOk){
+  unzip("./data/Coursera-SwiftKey.zip", exdir = "./data")  
+}
+```
+
+## Data Files Exploration.
+
+The text files in the data are intended to be a representative sample of common English written text in the media. We are going to analyze the structure of the sentences in these files, in order to build our models upont the results of the analysis. In order to familiarize ourselves with the data, here is some basic info about the files. 
+
+```{r readFiles, echo=FALSE, results='hide'}
+blogs = readLines(blogsFile, skipNul = TRUE)
+news = readLines(newsFile, skipNul = TRUE)
+twitter = readLines(twitterFile, skipNul = TRUE)
+```
+
+The **file sizes** (in MBytes) are:
+```{r fileSizes, echo=FALSE}
+blogFileSize = file.info(blogsFile)$size
+newsFileSize = file.info(newsFile)$size
+twitterFileSize = file.info(twitterFile)$size
+print(round(
+  c( "Blog file" = blogFileSize,
+     "News file" = newsFileSize, 
+     "Twitter file" = twitterFileSize) 
+  / 1024^2,1))
+```
+
+The **numbers of text lines** are:
+```{r lineNumbers, echo=FALSE}
+linesBlogs = length(blogs)
+linesNews = length(news)
+linesTwitter = length(twitter)
+print(c( 
+  "Blog file" = linesBlogs,
+  "News file" = linesNews,
+  "Twitter file" = linesTwitter))
+totalLines = linesBlogs + linesNews + linesTwitter
+```
+
+The text lines in the twitter file are of course limited in size. But in both the blogs and the newsfiles, the lines of text can be very long. The **maximum lengths of the lines** in the text files are the following:
+```{r maxLineLength, echo=FALSE}
+longestBlogsLine = max(nchar(blogs))
+longestNewsLine = max(nchar(news))
+longestTwitterLine = max(nchar(twitter))
+print(c( 
+  "Blog file" = longestBlogsLine,
+  "News file" = longestNewsLine,
+  "Twitter file" = longestTwitterLine))
+```
+A more representative idea of the length of the lines is however provided by the **median length** of the lines in the files:
+```{r medianLineLength, echo=FALSE}
+medianBlogsLine = median(nchar(blogs))
+medianNewsLine = median(nchar(news))
+medianTwitterLine = median(nchar(twitter))
+print(c( 
+  "Blog file" = medianBlogsLine,
+  "News file" = medianNewsLine,
+  "Twitter file" = medianTwitterLine))
+```
+
+## Data sampling.
+
+As we have just seen, the text files are very large in size. Trying to use the whole set of data would make the model construction too slow in terms of execution time, and too big to fit in memory in most computers (not to mention mobilde devices). Therefore, we have selected a random sample of the data to builf the model upon it: a *training data set*. Besides, this will allow us to use the rest of the data as a *test data set* for the accuracy of our model. The strategy for the sampling consists in putting together all the text lines in the files and taking a random number of those text lines. 
+
+```{r samplingData, echo=FALSE, results='hide'}
+textSource = c(blogs, news, twitter)
+set.seed(2015)
+p = 0.005
+numSampleLines = round(length(textSource) * p, 0)
+sampledLines = sort(sample(1:length(textSource), numSampleLines, replace = TRUE))
+textData = textSource[sampledLines]
+head(textData)
+```
+
+The total number of text lines in the data is `r totalLines` (over 4 million) but we will be considering a much smaller sample, consisting of a given percentage of that total number of lines (a `r 100 * p`% of the number of lines, giving a sample size of `r numSampleLines` lines of text).  Sampling is random and with replacement to keep the sample representative of the whole data set.
+
+# Data cleaning. 
+
+These text files are useful because they represent normal English text, as found online. However, that also means that they include all the kind of things that you expect from online texts, such as tweets and similar sources. We will have to deal with typos, nonsense text, foreign words, profanity, special structures such as urls, etc. Therefore, our first task is cleaning the data to make it amenable for the model building part of the project. Of course, some of the cleaning decissions made below can and will be revised as the model is built, to asess their impact on the model performance.   
+
+## Tokenization. 
+
+In Natural Language Processing (NLP), Tokenization refers to the process of breaking a txt up into its components (tokens), such as words. In this process,  the notion of token depends on the goal of the analysis, and the data cleaning is an integral part of this tokenization process. For this exploratory part of the project we begin with a quite crude version of the tokens, in that we start by:
+
++ Removing punctuation.
++ Removing numbers.
++ Converting all data to lower case.
+
+To tokenize the data we use the infrastructure provided by the `tm` package in R (see [tm](http://cran.r-project.org/web/packages/tm/index.html)). Technically, the text data is converted into a data structure called a *corpus* to carry out the tokenization. These corpus is made of so called *documents*, in this case a document for each line of text in the sampled data. For example, the content of the first document, previous to the tokenization process is:
+
+```{r createCorpusFromSample, echo=FALSE}
+en_Us_corpus = VCorpus(VectorSource(textData))
+```
+ 
+```{r oneSampleLine, echo=FALSE}
+en_Us_corpus[[1]]$content
+```
+And as you can see, it contains punctuation, upper case letters, symbols such as \$, etc. After arrying on the above steps the result is:
+```{r initialCleaning, echo=FALSE}
+en_Us_corpus = tm_map(en_Us_corpus, removePunctuation)
+#en_Us_corpus[[1]]$content
+
+en_Us_corpus = tm_map(en_Us_corpus, removeNumbers)
+#en_Us_corpus[[1]]$content
+
+en_Us_corpus = tm_map(en_Us_corpus, content_transformer(tolower))
+#en_Us_corpus[[1]]$content
+en_Us_corpus = tm_map(en_Us_corpus, stripWhitespace)
+en_Us_corpus[[1]]$content
+```
+
+## Handling profanity.
+
+To deal with profanity (and in general with any collection of undesired words) we are going to use a precompiled list of words from the *Luis von Ahn Research Group*, which is available online at the following address:
+
+[http://www.cs.cmu.edu/~biglou/resources/bad-words.txt](http://www.cs.cmu.edu/~biglou/resources/bad-words.txt)
+
+The cleaning process will look for the lines in our sample data containing any of these words, and will remove the word from the text, 
+
+```{r downloadProfanityList, echo=FALSE,}
+#We download the file and convert it to a vector of words.
+
+filteredWordsFile = "./data/removeWords.txt"
+if(!file.exists(filteredWordsFile)){
+  fileURL = "http://www.cs.cmu.edu/~biglou/resources/bad-words.txt"
+  download.file(fileURL, destfile = filteredWordsFile)
+}
+wordsToRemove = read.table(filteredWordsFile, stringsAsFactors = FALSE)
+wordsToRemove = as.character(wordsToRemove[, 1])
+```
+
+The list in this file can of course be replaced with any other suitable list of words to be removed from our data, but this one will do as proof of concept. 
+
+```{r removeProfanity, echo=FALSE}
+# Now we use `tm` to remove these words:
+en_Us_corpus = tm_map(en_Us_corpus, content_transformer(function(x){removeWords(x, wordsToRemove)}) )
+#en_Us_corpus[[1]]$content
+```
+
+## Further cleaning of the data.
+
+Besides, we are going to perform some other cleaning operations on the sample data. The basic idea is to define some patterns (technically, *regular expressions*) that we wish to remove from our data. 
+
+How does that work? For example, it's safe to say that any word containing four or more consecutive vowels can be removed from the data. Similarly, any word with six or more consecutive consonants may be removed (see the reference and the exceptions in [http://www.fun-with-words.com/word_consecutive_letters.html#Consonant_Sequence](http://www.fun-with-words.com/word_consecutive_letters.html#Consonant_Sequence)). In a later plhase of the analysis, further patterns can be identified, and the (expectedly small) impact of removing these patterns will be asessed.    
+
+```{r removeUndesiredPatterns, echo=FALSE, results='hide'}
+# We use a function that allows to remove the pieces of text that fit a given pattern, defined by a regular expression,  (see the `tm` help file for `content_transformer`). 
+
+removePattern = content_transformer(function(x, pattern) gsub(pattern, "", x))
+
+tooManyVowels = "[A-Za-z]*[aeiouAEIOU]{4,}[A-Za-z]*"
+en_Us_corpus = tm_map(en_Us_corpus, removePattern, pattern = tooManyVowels) 
+en_Us_corpus[[1]]$content
+
+tooManyConsonants = "[A-Za-z]*[^AEIOUaeiou\\s]{6,}[A-Za-z]*"
+en_Us_corpus = tm_map(en_Us_corpus, removePattern, pattern = tooManyConsonants) 
+en_Us_corpus[[1]]$content
+```
+
+Besides, we wouldlike to remove the "non-english characters" (like the chinese 坁, Spanish ñ, the french ô, etc.)
+
+```{r removeForeign, echo=FALSE}
+foreignChars = "[^A-Za-z[:space:]]"
+en_Us_corpus = tm_map(en_Us_corpus, removePattern, pattern = foreignChars) 
+#en_Us_corpus[[1]]$content
+```
+
+## Removing whitespace.
+
+Finally, after all these operations, our sample lines of text data will be left with quite a lot of whitespace, due in part to the parts that have been removed. 
+And another important cleaning operation consists of removing whitespace from the beginning or the end of a sentence, because those spaces can interfere with some parts of the analysis (e.g., with the count of the number of words in a sentence). 
+
+```{r removeWhiteSpace, echo=FALSE}
+en_Us_corpus = tm_map(en_Us_corpus, stripWhitespace)
+#en_Us_corpus[[19]]$content
+
+emptySpaceBeginEnd = "^\\s+|\\s+$"
+
+en_Us_corpus = tm_map(en_Us_corpus, removePattern, pattern = emptySpaceBeginEnd) 
+#en_Us_corpus[[19]]$content
+```
+An additional step after removing all the above from the data is to ensure that there are no empty lines of text left in the sample data. 
+
+# Exploratory Analysis of the Data.
+
+## Frequency Analysis of Words in the Data.
+
+After the cleaning operations have been carried out, the sample text data is ready for exploration. 
+
+```{r DTM, echo=FALSE}
+### Creating a term document matrix and the traspose document term matrix. 
+en_Us_corpus.tdm = TermDocumentMatrix(en_Us_corpus)
+numWords_1 = dim(en_Us_corpus.tdm)[1]
+#inspect(en_Us_corpus.tdm[1:10, 1:10])
+
+en_Us_corpus.dtm = DocumentTermMatrix(en_Us_corpus)
+#dim(en_Us_corpus.dtm)
+#inspect(en_Us_corpus.dtm[1:10, 1:10])
+```
+
+For starters, we can ask for the most freuqent words in the data. The following table shows the most frequent words in our sample. More precisely, the table contains in decreasing rder the frequencies of the words that appear more than 1500 times in the data.   
+
+```{r mostFreqTerms, echo=FALSE}
+mostFreqTerms = findFreqTerms(en_Us_corpus.tdm, 1500)
+#length(mostFreqTerms)
+
+lexicon = colnames(en_Us_corpus.dtm)
+#lexicon[12500:13000]
+
+highestFreqCols = colnames(en_Us_corpus.dtm) %in% mostFreqTerms
+topWords = en_Us_corpus.dtm[ , highestFreqCols]
+(topFrequencies = sort(colSums(as.matrix(topWords)), decreasing = TRUE))
+```
+
+Graphically: 
+```{r barPLotMostFrequent, echo=FALSE, fig.align='center'}
+barplot(topFrequencies)
+```
+
+It is also interesting to take a look at the whole picture of the frequency distribution of the words in the data (which is, somehow, the reverse of the previous picture). You can see that almost all of the words appear only a few times in the data. For graphical purposes we have limited this to include words that appear at least $100$ times in the data, and you can clearly see in the picture that  the frequency distribution is extremely skewed. The small bumps in the right tail correspond to the most frequent words that we have identified before, such as "the" or "and":
+
+```{r histFrequencies, echo=FALSE, fig.align='center'}
+listWords = findFreqTerms(en_Us_corpus.tdm, 100)
+FreqCols = colnames(en_Us_corpus.dtm) %in% listWords
+wordsByFreq = en_Us_corpus.dtm[ , FreqCols]
+Frequencies = sort(colSums(as.matrix(wordsByFreq)), decreasing = TRUE)
+plot(density(Frequencies), main="", xlab="Frequency of word", ylab="Number of words", lwd=3, col="red")
+```
+
+It comes as no surprise that the most frequent words are the so-called *stopwords* because these words serve as basic building blocks for English sentences.  In many areas of NLP removing the stopwords is a necessary step of tokenization. However, for this particular application,  I think that is better to keep them. A useful text predicting model must be able to predict these stop words, precisely because they represent such a big fraction of the users text input. 
+
+```{r preprocessedText, echo=FALSE}
+### Obtaining the preprocessed text. 
+
+#### We are going to obtain a character vector with the result of the previous cleaning operations:
+
+pprocText = sapply(1:length(en_Us_corpus), function(i){en_Us_corpus[[i]]$content})
+#head(pprocText)
+
+# We count the words in each sentence
+countWords = function(x){length(strsplit(x,"\\s+")[[1]])}
+numWords = sapply(pprocText, countWords)
+#pprocText[numWords == 0]
+
+# And we use those counts to remove the lines with zero words from the data.
+
+pprocText = pprocText[numWords > 0]
+numWords = numWords[numWords > 0]
+
+```
+
+
+## Frequency analysis of n-grams in the sample data. 
+
+In the context of NLP, a *n-gram* (see [Wikipedia](http://en.wikipedia.org/wiki/N-gram)) is a contiguous sequence of $n$ tokens; think $n$ consecutive words in a sentence. Many NLP models make extensive use of the analysis of the n-grams appearing in a corpus of text, and this becomes specially important in text predicting appplications. Thus we turn now to the analysis of the n-grams in our sample data, for different values of $n$.
+
+The following function can be used to extract the n-grams from a character vector. 
+```{r nGramExtractFunction, echo=FALSE}
+library(ngram)
+ngramExtract = function(x, n){get.ngrams(ngram(x, n))}
+```
+
+Let's see how n-grams work. We take any of the sampled text lines in our data and extract, e.g., the 3-grams. This is the text:
+```{r nGramsExample, echo=FALSE}
+set.seed(2015)
+k = sample(1:length(pprocText), 1)
+pprocText[k]
+```
+and these are all the possible 3-grams in that sentence:
+```{r nGramsExample2, echo=FALSE}
+ngramExtract(pprocText[k], n = 3)
+```
+To analyze the n-grams distribution in the English sentences in our data we to apply this method to extract all the n-grams for each sentence in the sample data, for some values of $n$. 
+
+Let us begin with $n=2$ (as $n= 1$ would bring us back to words)). The 10 most frequent 2-grams in the sample data appear in the following table:
+```{r ngrams_2, echo=FALSE, results='hide'}
+n = 2
+grams_n = lapply(pprocText[numWords >= n], ngramExtract, n)
+grams_n_vec = unlist(grams_n)
+head(sort(table(grams_n_vec), decreasing = TRUE), 10)
+```
+Similarly for 3-grams we get:
+
+```{r ngrams_3, echo=FALSE}
+n = 3
+grams_n = lapply(pprocText[numWords >= n], ngramExtract, n)
+grams_n_vec = unlist(grams_n)
+head(sort(table(grams_n_vec), decreasing = TRUE), 10)
+```
+
+Finally for 4-grams:
+```{r ngrams_4, echo=FALSE}
+n = 4
+grams_n = lapply(pprocText[numWords >= n], ngramExtract, n)
+grams_n_vec = unlist(grams_n)
+head(sort(table(grams_n_vec), decreasing = TRUE), 10)
+```
+
+In all cases, the analysis of the n-grmas frequencies indicates that it is necessary to go beyond a simple n-gram search, since a vast majority of the n-grams appear only once in the data, as illustrated in the following figure in the case of 4-grams. 
+```{r}
+barplot(table(table(grams_n_vec))[1:10], 
+        xlab="Number of times that the 4-gram appears in the text",
+        ylab="Number of 4-grams", main="Frequency distribution of 4-gram appearances",
+        col="orange")
+```
+This emphasizes the importance of using the appropriate model for prediction.
+
+
+**Tecnical side note:** I am using the `ngram` library for this part of the analysis (see [ngram](http://cran.r-project.org/web/packages/ngram/ngram.pdf)). A more popular choice for this is the RWeka library (see [RWeka](http://cran.r-project.org/web/packages/RWeka/index.html)). However, the R code supporting these analysis has been tested in Windows, Linux and Mac machines, and I have found many compatibilityissues between this library and the Java versions in the test machines . I have managed to make RWeka in Windows machines, but I'll try to carry out the rest of the model construction without using this library, to increase the portability of the code.  
+
+# Final Remarks.
+
+The exploratory data analysis in this report is just the first step in the model building process. The next step is to obtain a simple n-gram model (see [Wikipedia](http://en.wikipedia.org/wiki/N-gram)) from this data. Some other ideas for the rest of the project are the following:
+
+1. The initial exploration of the data has not taken typos or foreign language words into account. The first problem may be approached using regular expressions with `agrep` and an English dictionary of words. A dictionary-based approach may be useful also for foreign languages. It is possible, however, that the incidence of both problems upon the final model may be small (this has still to be confirmed). 
+
+2. Additional sources of text can be easily  incorporate into this framework, to see if this results in an increased accuracy and coverage of the model. 
+
+3. An essential part of the remaining work is the study of the dependence between the accuracy of the model and the sample size. 
+
+
+# References.
+
+ + [https://www.coursera.org/specialization/jhudatascience/](Web site for the Coursera Data Science Specialization) 
+ + *Speech and Language Processing, 2nd edition* by D.Jurafsky and J.H.Martin. Published by Prentice Hall (2008).
+
+
