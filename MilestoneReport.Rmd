@@ -1,3 +1,4 @@
+
 ---
 title: Milestone Report.
 subtitle: <h3>Capstone Project of the Coursera JHU Data Science Specialization.</h3>
@@ -14,17 +15,17 @@ output:
 
 This report describes my up to date work in the Capstone Project of the [Coursera JHU Data Science Specialization](https://www.coursera.org/specialization/jhudatascience/). The main goal of this project is to use R to design an application that starting from an input text will predict the next word in the input. 
 
-This is a non-technical summary, intended for a general audience. For a complete version with all the code details, please look at 
+This is a non-technical summary, intended for a general audience. For a complete version with all the code details, please look at the associated [GitHub repository](https://github.com/fss14142/DataScienceMilestoneReport).
 
 ```{r Setup, echo=FALSE, message=FALSE, warning=FALSE}
 
 ## Initial knitr options and  required libraries.
 options(cache=TRUE)
 
-#install.packages(c("R.utils", "tm", "caret", "RWeka", "RWekajars"), dependencies = TRUE)
+#install.packages(c("R.utils", "tm", "ngram", "RWeka", "RWekajars"), dependencies = TRUE)
 require(tm)
 require(R.utils)
-require(caret)
+require(ngram)
 ```
 
 ---- 
@@ -121,7 +122,7 @@ print(c(
 
 ## Data sampling.
 
-As we have just seen, the text files are very large in size. Trying to use the whole set of data would make the model construction too slow in terms of execution time, and too big to fit in memory in most computers (not to mention mobilde devices). Therefore, we have selected a random sample of the data to builf the model upon it: a *training data set*. Besides, this will allow us to use the rest of the data as a *test data set* for the accuracy of our model. The strategy for the sampling consists in putting together all the text lines in the files and taking a random number of those text lines. 
+As we have just seen, the text files are very large in size. Trying to use the whole set of data would make the model construction too slow in terms of execution time, and too big to fit in memory in most computers (not to mention mobile devices). Therefore, we have selected a random sample of the data to build the model upon it: a *training data set*. Besides, this will allow us to use the rest of the data as a *test data set* for the accuracy of our model. The strategy for the sampling consists in putting together all the text lines in the files and taking a random number of those text lines. 
 
 ```{r samplingData, echo=FALSE, results='hide'}
 textSource = c(blogs, news, twitter)
@@ -202,7 +203,7 @@ en_Us_corpus = tm_map(en_Us_corpus, content_transformer(function(x){removeWords(
 
 Besides, we are going to perform some other cleaning operations on the sample data. The basic idea is to define some patterns (technically, *regular expressions*) that we wish to remove from our data. 
 
-How does that work? For example, it's safe to say that any word containing four or more consecutive vowels can be removed from the data. Similarly, any word with six or more consecutive consonants may be removed (see the reference and the exceptions in [http://www.fun-with-words.com/word_consecutive_letters.html#Consonant_Sequence](http://www.fun-with-words.com/word_consecutive_letters.html#Consonant_Sequence)). In a later plhase of the analysis, further patterns can be identified, and the (expectedly small) impact of removing these patterns will be asessed.    
+How does that work? For example, it's safe to say that any word containing four or more consecutive vowels can be removed from the data. Similarly, any word with six or more consecutive consonants may be removed (see the reference and the exceptions in [http://www.fun-with-words.com/word_consecutive_letters.html#Consonant_Sequence](http://www.fun-with-words.com/word_consecutive_letters.html#Consonant_Sequence)). In a later phase of the analysis, further patterns can be identified, and the (expectedly small) impact of removing these patterns will be asessed.    
 
 ```{r removeUndesiredPatterns, echo=FALSE, results='hide'}
 # We use a function that allows to remove the pieces of text that fit a given pattern, defined by a regular expression,  (see the `tm` help file for `content_transformer`). 
@@ -218,7 +219,7 @@ en_Us_corpus = tm_map(en_Us_corpus, removePattern, pattern = tooManyConsonants)
 en_Us_corpus[[1]]$content
 ```
 
-Besides, we wouldlike to remove the "non-english characters" (like the chinese 坁, Spanish ñ, the french ô, etc.)
+Besides, we would like to remove the "non-english characters" (like the chinese 坁, Spanish ñ, the french ô, etc.)
 
 ```{r removeForeign, echo=FALSE}
 foreignChars = "[^A-Za-z[:space:]]"
@@ -259,7 +260,7 @@ en_Us_corpus.dtm = DocumentTermMatrix(en_Us_corpus)
 #inspect(en_Us_corpus.dtm[1:10, 1:10])
 ```
 
-For starters, we can ask for the most freuqent words in the data. The following table shows the most frequent words in our sample. More precisely, the table contains in decreasing rder the frequencies of the words that appear more than 1500 times in the data.   
+For starters, we can ask for the most frequent words in the data. The following table shows the most frequent words in our sample. More precisely, the table contains in decreasing order the frequencies of the words that appear more than 1500 times in the data.   
 
 ```{r mostFreqTerms, echo=FALSE}
 mostFreqTerms = findFreqTerms(en_Us_corpus.tdm, 1500)
@@ -324,14 +325,14 @@ ngramExtract = function(x, n){get.ngrams(ngram(x, n))}
 Let's see how n-grams work. We take any of the sampled text lines in our data and extract, e.g., the 3-grams. This is the text:
 ```{r nGramsExample, echo=FALSE}
 set.seed(2015)
-k = sample(1:length(pprocText), 1)
+k = 1303 #sample(1:length(pprocText), 1)
 pprocText[k]
 ```
 and these are all the possible 3-grams in that sentence:
 ```{r nGramsExample2, echo=FALSE}
 ngramExtract(pprocText[k], n = 3)
 ```
-To analyze the n-grams distribution in the English sentences in our data we to apply this method to extract all the n-grams for each sentence in the sample data, for some values of $n$. 
+To analyze the n-grams distribution in the English sentences in our data we apply this method to extract all the n-grams for each sentence in the sample data, for some values of $n$. 
 
 Let us begin with $n=2$ (as $n= 1$ would bring us back to words)). The 10 most frequent 2-grams in the sample data appear in the following table:
 ```{r ngrams_2, echo=FALSE, results='hide'}
@@ -357,8 +358,8 @@ grams_n_vec = unlist(grams_n)
 head(sort(table(grams_n_vec), decreasing = TRUE), 10)
 ```
 
-In all cases, the analysis of the n-grmas frequencies indicates that it is necessary to go beyond a simple n-gram search, since a vast majority of the n-grams appear only once in the data, as illustrated in the following figure in the case of 4-grams. 
-```{r}
+In all cases, the analysis of the n-grams frequencies indicates that it is necessary to go beyond a simple n-gram search, since a vast majority of the n-grams appear only once in the data, as illustrated in the following figure in the case of 4-grams. 
+```{r echo=FALSE, fig.align='center'}
 barplot(table(table(grams_n_vec))[1:10], 
         xlab="Number of times that the 4-gram appears in the text",
         ylab="Number of 4-grams", main="Frequency distribution of 4-gram appearances",
@@ -367,13 +368,13 @@ barplot(table(table(grams_n_vec))[1:10],
 This emphasizes the importance of using the appropriate model for prediction.
 
 
-**Tecnical side note:** I am using the `ngram` library for this part of the analysis (see [ngram](http://cran.r-project.org/web/packages/ngram/ngram.pdf)). A more popular choice for this is the RWeka library (see [RWeka](http://cran.r-project.org/web/packages/RWeka/index.html)). However, the R code supporting these analysis has been tested in Windows, Linux and Mac machines, and I have found many compatibilityissues between this library and the Java versions in the test machines . I have managed to make RWeka in Windows machines, but I'll try to carry out the rest of the model construction without using this library, to increase the portability of the code.  
+**Tecnical side note:** I am using the `ngram` library for this part of the analysis (see [ngram](http://cran.r-project.org/web/packages/ngram/ngram.pdf)). A more popular choice for this is the RWeka library (see [RWeka](http://cran.r-project.org/web/packages/RWeka/index.html)). However, the R code supporting these analysis has been tested in Windows, Linux and Mac machines, and I have found many compatibility issues between this library and the Java versions in the test machines . I have managed to make RWeka work in Windows machines, but I'll try to carry out the rest of the model construction without using this library, to increase the portability of the code.  
 
 # Final Remarks.
 
 The exploratory data analysis in this report is just the first step in the model building process. The next step is to obtain a simple n-gram model (see [Wikipedia](http://en.wikipedia.org/wiki/N-gram)) from this data. Some other ideas for the rest of the project are the following:
 
-1. The initial exploration of the data has not taken typos or foreign language words into account. The first problem may be approached using regular expressions with `agrep` and an English dictionary of words. A dictionary-based approach may be useful also for foreign languages. It is possible, however, that the incidence of both problems upon the final model may be small (this has still to be confirmed). 
+1. The initial exploration of the data has not taken typos or foreign language words into account. The first problem may be approached using regular expressions with `agrep` and an English dictionary of words. A dictionary based approach may be useful also for foreign languages. It is possible, however, that the incidence of both problems upon the final model may be small (this has still to be confirmed). 
 
 2. Additional sources of text can be easily  incorporate into this framework, to see if this results in an increased accuracy and coverage of the model. 
 
